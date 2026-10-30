@@ -13,7 +13,7 @@
   </style>
 </head>
 <body>
-  <div id="panel"><strong>MONKE-VR</strong><p>Forest prototype • Put on your Quest headset and tap Enter VR.</p><p>In VR: use either controller thumbstick to move. On a computer: WASD to walk, mouse to look.</p><p id="status">Checking VR support…</p></div>
+  <div id="panel"><strong>MONKE-VR</strong><p>Forest prototype • Put on your Quest headset and tap Enter VR.</p><p>In VR: push a controller down near the ground or against a tree to move. Thumbsticks are still available as a backup. On a computer: WASD to walk, mouse to look.</p><p id="status">Checking VR support…</p></div>
   <script type="module">
     import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
     import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
@@ -42,7 +42,9 @@
 
     const trunkMat = new THREE.MeshStandardMaterial({color:0x62432b});
     const leafMats = [0x245b3b,0x2f7047,0x3e8050].map(c=>new THREE.MeshStandardMaterial({color:c,roughness:1}));
+    const treeTrunks=[];
     function tree(x,z,s=1){
+      treeTrunks.push({x,z,r:.34*s,h:2.8*s});
       const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.22*s,.34*s,2.8*s,7),trunkMat);
       trunk.position.set(x,1.4*s,z); trunk.castShadow=true; scene.add(trunk);
       for(let i=0;i<3;i++){
@@ -67,6 +69,8 @@
     const handGeo=new THREE.SphereGeometry(.095,16,12);
     const handMat=new THREE.MeshStandardMaterial({color:0xffc28a});
     const controllers=[];
+    const previousHands=[null,null];
+    const handWorld=new THREE.Vector3();
     for(let i=0;i<2;i++){
       const c=renderer.xr.getController(i);
       const hand=new THREE.Mesh(handGeo,handMat); c.add(hand); scene.add(c); controllers.push(c);
@@ -92,6 +96,32 @@
         const dir=new THREE.Vector3(side,0,-forward).applyAxisAngle(new THREE.Vector3(0,1,0),yaw);
         if(dir.lengthSq()) rig.position.addScaledVector(dir.normalize(),dt*4);
       } else {
+        // Early hand-push locomotion: push down on the floor or sideways against a tree.
+        // This is a prototype; it will need tuning and proper collision physics.
+        for(let i=0;i<controllers.length;i++){
+          const controller=controllers[i];
+          controller.getWorldPosition(handWorld);
+          if(previousHands[i]){
+            const touchingGround=handWorld.y<0.24;
+            let touchingTree=false;
+            for(const trunk of treeTrunks){
+              const dx=handWorld.x-(trunk.x+rig.position.x);
+              const dz=handWorld.z-(trunk.z+rig.position.z);
+              if(Math.hypot(dx,dz)<trunk.r+0.16 && handWorld.y>0.05 && handWorld.y<trunk.h+0.15){
+                touchingTree=true; break;
+              }
+            }
+            if(touchingGround || touchingTree){
+              const pushX=previousHands[i].x-handWorld.x;
+              const pushZ=previousHands[i].z-handWorld.z;
+              rig.position.x+=pushX*1.25;
+              rig.position.z+=pushZ*1.25;
+            }
+          }
+          if(!previousHands[i]) previousHands[i]=new THREE.Vector3();
+          previousHands[i].copy(handWorld);
+        }
+        // Thumbstick backup movement.
         const session=renderer.xr.getSession();
         if(session){
           for(const source of session.inputSources){
