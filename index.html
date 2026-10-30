@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>Monke-VR — Forest Prototype</title>
+  <style>
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#07130e;font-family:system-ui,Arial;color:#fff}
+    #panel{position:fixed;top:14px;left:14px;z-index:2;max-width:320px;padding:12px 14px;background:#07130ecc;border:1px solid #7da58b66;border-radius:12px;backdrop-filter:blur(8px)}
+    #panel strong{font-size:18px}#panel p{font-size:13px;line-height:1.4;margin:6px 0 0;color:#d4e5d9}
+    #status{color:#a7f3c0!important}
+    canvas{display:block}
+  </style>
+</head>
+<body>
+  <div id="panel"><strong>MONKE-VR</strong><p>Forest prototype • Put on your Quest headset and tap Enter VR.</p><p>In VR: use either controller thumbstick to move. On a computer: WASD to walk, mouse to look.</p><p id="status">Checking VR support…</p></div>
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+    import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x9bc5bd);
+    scene.fog = new THREE.Fog(0x9bc5bd, 16, 75);
+    const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 150);
+    camera.position.set(0,1.65,5);
+    const rig = new THREE.Group(); rig.add(camera); scene.add(rig);
+
+    const renderer = new THREE.WebGLRenderer({antialias:true});
+    renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    renderer.setSize(innerWidth,innerHeight);
+    renderer.xr.enabled = true;
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+    document.body.appendChild(VRButton.createButton(renderer));
+
+    scene.add(new THREE.HemisphereLight(0xd9f4ff,0x30452b,2));
+    const sun = new THREE.DirectionalLight(0xffefcf,2.2);
+    sun.position.set(-8,16,7); sun.castShadow=true; scene.add(sun);
+
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(180,180),new THREE.MeshStandardMaterial({color:0x345d38,roughness:1}));
+    ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; scene.add(ground);
+
+    const trunkMat = new THREE.MeshStandardMaterial({color:0x62432b});
+    const leafMats = [0x245b3b,0x2f7047,0x3e8050].map(c=>new THREE.MeshStandardMaterial({color:c,roughness:1}));
+    function tree(x,z,s=1){
+      const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.22*s,.34*s,2.8*s,7),trunkMat);
+      trunk.position.set(x,1.4*s,z); trunk.castShadow=true; scene.add(trunk);
+      for(let i=0;i<3;i++){
+        const crown=new THREE.Mesh(new THREE.ConeGeometry((1.35-i*.17)*s,2.5*s,7),leafMats[(Math.random()*leafMats.length)|0]);
+        crown.position.set(x,(3.1+i*.78)*s,z); crown.castShadow=true; scene.add(crown);
+      }
+    }
+    // Open clearing around the spawn, with trees forming a forest ring.
+    for(let i=0;i<95;i++){
+      const a=Math.random()*Math.PI*2, r=9+Math.random()*42;
+      tree(Math.cos(a)*r,Math.sin(a)*r,.7+Math.random()*.8);
+    }
+    // A few rocks along the path.
+    const rockMat=new THREE.MeshStandardMaterial({color:0x66766c,roughness:1});
+    for(let i=0;i<24;i++){
+      const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(.35+Math.random()*.5,0),rockMat);
+      rock.position.set((Math.random()-.5)*18,.25,(Math.random()-.5)*24-7);
+      rock.rotation.set(Math.random(),Math.random(),Math.random()); rock.castShadow=true; scene.add(rock);
+    }
+
+    // Controller models make the tracked hands visible in the first prototype.
+    const handGeo=new THREE.SphereGeometry(.095,16,12);
+    const handMat=new THREE.MeshStandardMaterial({color:0xffc28a});
+    const controllers=[];
+    for(let i=0;i<2;i++){
+      const c=renderer.xr.getController(i);
+      const hand=new THREE.Mesh(handGeo,handMat); c.add(hand); scene.add(c); controllers.push(c);
+    }
+
+    const status=document.querySelector('#status');
+    status.textContent = navigator.xr ? 'WebXR detected. Select Enter VR to try it.' : 'No WebXR detected in this browser. You can still preview the forest.';
+    const keys={};
+    addEventListener('keydown',e=>keys[e.key.toLowerCase()]=true);
+    addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+    let yaw=0;
+    let dragging=false,lastX=0;
+    renderer.domElement.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX});
+    addEventListener('pointerup',()=>dragging=false);
+    addEventListener('pointermove',e=>{if(dragging&&!renderer.xr.isPresenting){yaw-=(e.clientX-lastX)*.004;lastX=e.clientX;rig.rotation.y=yaw}});
+
+    const clock=new THREE.Clock();
+    function animate(){
+      const dt=Math.min(clock.getDelta(),.04);
+      if(!renderer.xr.isPresenting){
+        const forward=(keys.w?1:0)-(keys.s?1:0);
+        const side=(keys.d?1:0)-(keys.a?1:0);
+        const dir=new THREE.Vector3(side,0,-forward).applyAxisAngle(new THREE.Vector3(0,1,0),yaw);
+        if(dir.lengthSq()) rig.position.addScaledVector(dir.normalize(),dt*4);
+      } else {
+        const session=renderer.xr.getSession();
+        if(session){
+          for(const source of session.inputSources){
+            const axes=source.gamepad?.axes;
+            if(!axes || axes.length<2) continue;
+            const x=axes.length>=4?axes[2]:axes[0];
+            const y=axes.length>=4?axes[3]:axes[1];
+            if(Math.abs(x)>.16 || Math.abs(y)>.16){
+              const viewDir=new THREE.Vector3();
+              camera.getWorldDirection(viewDir); viewDir.y=0; viewDir.normalize();
+              const right=new THREE.Vector3().crossVectors(viewDir,new THREE.Vector3(0,1,0)).normalize();
+              rig.position.addScaledVector(viewDir,-y*dt*3.2);
+              rig.position.addScaledVector(right,x*dt*3.2);
+            }
+          }
+        }
+      }
+      renderer.render(scene,camera);
+    }
+    renderer.setAnimationLoop(animate);
+    addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+  </script>
+</body>
+</html>
